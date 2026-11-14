@@ -1,6 +1,7 @@
 Scripts to simplify the process of using flash encryption on your ESP32 device.
 
 Create an encryption key using generate_encryption_key.py
+
 Save the key securely.
 
 Read variables at the top of the python scripts and update for your use scenario.
