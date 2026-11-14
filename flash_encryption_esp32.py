@@ -1,3 +1,10 @@
+'''
+Code and guide posted at:
+https://github.com/UsableLoki8221/GUIDE---ESP32_Flash_Encryption
+'''
+
+# This script should effectively replace your upload command
+
 import csv
 import configparser
 import json
@@ -11,12 +18,17 @@ from pathlib import Path
 import serial
 from serial.tools import list_ports
 
-# efuse summary command
+# INFO: OTA updating uses plaintext binary whether or not flash encryption is enabled
+# Flash encryption is used to protect against firmware dumping
+
+# efuse summary command example
 #    python -m platformio pkg exec -p tool-esptoolpy -- espefuse.py --chip esp32c3 --port COM22 summary
 # json form:
 #   python -m platformio pkg exec -p tool-esptoolpy -- espefuse.py --chip esp32c3 --port COM22 summary --format json
 
 ENV_NAME = "esp32-c3"           # match this to the env name you're using in your platformio.ini
+
+REBUILD_ALL_BINARIES = True     # this should be True- added this so my video can be faster to present, so the code doesn't need to rebuilt constantly each time I ran this
 
 COM_PORT = ""                   # leave as "" to auto-detect esp COM port, otherwise manually enter with COMxx format
 
@@ -27,18 +39,29 @@ SERIAL_MONITOR = True           # view device serial monitor message directly af
 FILESYSTEM_TYPE = "littlefs"    # supported fs types: "spiffs", "littlefs", "fatfs"
 
 ENABLE_INFO = True              # script debug message viewer
+SHOW_FUSE_SUMMARY = False       # see the fuse summary as you upload - don't recommend because its a wall of text, it'll clear your terminal up
 
+# vvv CHANGE THIS IF NEEDED FOR LARGER FLASH SIZE BOARDS
 PARTITION_CSV_PATH = ""         # if using a different partition scheme then set csv file path, otherwise default values used:
+                                # this is usually located somewhere like..C:\Users\[USERNAM]\.platformio\packages\framework-arduinoespressif32\tools\partitions
+                                # default partition is.. "C:\Users\...\.platformio\packages\framework-arduinoespressif32\tools\partitions\default.csv"
 
-#UPLOAD_STATE = "plaintext"        # force upload to be encrypted or plaintext depending if this is set to "encrypt" or "plaintext".  Comment for auto-detect
+UPLOAD_STATE = ""               # auto-detect
+#UPLOAD_STATE = "plaintext"     # force upload to be encrypted or plaintext depending if this is set to "encrypt" or "plaintext".  Comment for auto-detect
 #UPLOAD_STATE = "encrypt"
+
+IWANTINTERESTINGLOADINGBARS = True # spice up the loading bar
+
+###
+### you shouldn't need to change anything below here
+###
 
 # THESE WILL GET OVERWRITTEN IF YOU SPECIFY A PARTITION in PARTITION_CSV_PATH above
 DEFAULT_BOOTLOADER_OFFSET = 0x0
 DEFAULT_PARTITION_TABLE_OFFSET = 0x8000
 DEFAULT_OTADATA_OFFSET = 0xE000
 DEFAULT_APP_OFFSET = 0x10000
-DEFAULT_FS_OFFSET = 0x670000
+DEFAULT_FS_OFFSET = 0x290000
 
 PROJECT_DIR = Path(__file__).resolve().parent
 
@@ -78,8 +101,11 @@ def print_rainbow(text, index=-1, end='\n'):
     output = BOLD
     color_index = 0
     fixed_color = None
+    color = colors[0]
+
     if index != -1:
         fixed_color = colors[index % len(colors)]
+        
     for char in text:
         if fixed_color is not None:
             color = fixed_color
@@ -315,7 +341,7 @@ def read_efuse_summary():
 
 
     output = result.stdout
-    info(output)
+    if SHOW_FUSE_SUMMARY: print(output)
     start = output.find("{")
     end = output.rfind("}")
     if start < 0 or end < start:
@@ -358,10 +384,13 @@ def detect_flash_encryption(summary):
 
     value = counter.get("value")
 
-    # espefuse JSON can represent an unset counter as "Disable".
+    # espefuse JSON can represent an unset counter as "Disable" or "Enable".
     if isinstance(value, str) and value.strip().lower() == "disable":
         info(f"{name} = Disable; flash encryption is DISABLED.")
         return False
+    if isinstance(value, str) and value.strip().lower() == "enable":
+        info(f"{name} = Enable; flash encryption is ENABLED.")
+        return True
 
     if isinstance(value, bool) or not isinstance(value, int):
         raw_value = counter.get("raw_value")
@@ -461,8 +490,9 @@ def build_images():
     command = [
         "python", "-m", "platformio", "run", "-e", env_name
     ]
-    info(f"Building PlatformIO environment '{env_name}'...")
-    run_command(command)
+    if REBUILD_ALL_BINARIES:
+        info(f"Building PlatformIO environment '{env_name}'...")
+        run_command(command)
 
     build_dir = PROJECT_DIR / ".pio" / "build" / env_name
     images = {
@@ -481,8 +511,9 @@ def build_images():
             "python", "-m", "platformio", "run",
             "-e", env_name, "-t", "buildfs",
         ]
-        info("Building filesystem image...")
-        run_command(fs_command)
+        if REBUILD_ALL_BINARIES:
+            info("Building filesystem image...")
+            run_command(fs_command)
 
         fs_names = {
             "spiffs": "spiffs.bin",
@@ -500,33 +531,6 @@ def build_images():
         images["filesystem"] = fs_path
 
     return images
-
-
-def encrypt_binaryyyy(input_path, offset):
-    input_path = Path(input_path)
-    if not FLASH_ENCRYPTION_KEY.is_file():
-        raise FileNotFoundError(
-            f"Flash-encryption key not found: {FLASH_ENCRYPTION_KEY}"
-        )
-
-    output_path = input_path.with_name(f"{input_path.stem}_encrypted{input_path.suffix}")
-    command = get_esptool_command(
-        "espsecure",
-        "encrypt_flash_data",
-        "--aes-xts",
-        "--keyfile",
-        str(FLASH_ENCRYPTION_KEY),
-        "--address",
-        hex(offset),
-        "--output",
-        str(output_path),
-        str(input_path),
-    )
-    info(f"Encrypting {input_path.name} for flash address 0x{offset:X}...")
-    run_command(command)
-    if not output_path.is_file():
-        raise RuntimeError(f"Encryption output was not created: {output_path}")
-    return output_path
 
 
 def encrypt_binary(input_path, offset):
@@ -553,8 +557,8 @@ def encrypt_binary(input_path, offset):
         "-p",
         "tool-esptoolpy",
         "--",
-        #"espsecure.py",
-        r"C:\Espressif\frameworks\esp-idf-v5.4.1\components\esptool_py\esptool\espsecure.py", # this was most important part to successfully getting file encryption to work, built in platformio tool did not work like this did
+        "espsecure.py", # comment this if running espsecure from esp idf folder below v
+        #r"C:\Espressif\frameworks\esp-idf-v5.4.1\components\esptool_py\esptool\espsecure.py", # I've had issues where espsecure python file in platformio did not encrypt correct, it was fixed directly running it from esp idf tools
         "encrypt_flash_data",
         "--aes-xts",
         "--keyfile", str(FLASH_ENCRYPTION_KEY),
@@ -571,7 +575,7 @@ def encrypt_binary(input_path, offset):
         bufsize=1
     )
 
-    if (False):
+    if (ENABLE_INFO):
         for line in process.stdout:
             print(line, end='')
 
@@ -593,10 +597,13 @@ def flash_images(images, offsets, flash_encryption):
             images["filesystem"] = encrypt_binary(
                 images["filesystem"], offsets["filesystem"]
             )
+            info(
+                "Filesystem will be written encrypted because ENCRYPT_FS=True. "
+                "Confirm that this matches the partition CSV scheme-flag must be set according to espressif."
+            )
         elif UPLOAD_FS:
             info(
                 "Filesystem will be written unencrypted because ENCRYPT_FS=False. "
-                "Confirm that this matches the partition CSV scheme-flag must be set according to espressif."
             )
     print(f"FLASH_MODE: {FLASH_MODE}")
     print(f"FLASH_FREQ: {FLASH_FREQ}")
@@ -650,9 +657,46 @@ def flash_images(images, offsets, flash_encryption):
     output = []
     try:
         assert process.stdout is not None
-        for line in process.stdout:
-            print(line, end="")
-            output.append(line)
+
+
+        ####
+        if IWANTINTERESTINGLOADINGBARS: # set to False if you don't want colorful loading bars-but why wouldn't you tho?
+            full_output = []
+            rainbow_flag = False
+            line_index = 0
+            import random
+            array_size = round((random.randint(2, 7) + random.randint(2, 7)) / 2) # average of 2 occurences naturally biases towards center is more likely
+            random_array = random.sample(range(7), array_size)
+
+            for line in iter(process.stdout.readline, ''):
+                #if "Writing at 0x00010000" in line:
+                if True:
+                    rainbow_flag = True
+
+                if "Writing at" in line and rainbow_flag:
+                    before, sep, after = line.partition("[")
+                    bracket_content, closing, remainder = after.partition("]")
+
+                    print(before + sep, end='')
+                    print_rainbow(bracket_content, random_array[line_index % len(random_array)], end='')
+                    print(closing + remainder, end='')
+                    # the uploader used to be the percentage within parenthesis
+                    #before, sep, after = line.partition("(")
+                    #print(before, end='')
+                    #print_rainbow(sep + after, random_array[line_index % len(random_array)], end='')
+                    
+                    #print_rainbow(sep + after, line_index, end='')
+                    line_index += 1
+                    ###line_index = random.randint(1, 700)
+                else:
+                    print(line, end='')
+                full_output.append(line)
+        else:
+            for line in process.stdout:
+                print(line, end="")
+                output.append(line)
+        ####
+        
         return_code = process.wait()
     except KeyboardInterrupt:
         process.terminate()
@@ -664,11 +708,12 @@ def flash_images(images, offsets, flash_encryption):
             "Flashing failed:\n" + "".join(output)
         )
 
-    print(f"{GREEN}{BOLD}Firmware flashing completed successfully.{RESET}")
+    if flash_encryption: print(f"{GREEN}{BOLD}ENCRYPTED - Firmware flashing completed successfully.{RESET}")
+    else: print(f"{GREEN}{BOLD}PLAINTEXT - Firmware flashing completed successfully.{RESET}")
 
 
 def serial_monitor():
-    print("\nOpening serial monitor. Press Ctrl+C to exit.\n")
+    print(f"\nOpening serial monitor. Press {BOLD}{ORANGE}Ctrl+C{RESET} to exit.\n")
     try:
         with serial.Serial(COM_PORT, 115200, timeout=0.2) as connection:
             while True:
@@ -717,7 +762,46 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
 FLASH_ENCRYPTION = True
+
+BOOT_APP0_PATH = (
+    Path.home()
+    / ".platformio"
+    / "packages"
+    / "framework-arduinoespressif32"
+    / "tools"
+    / "partitions"
+    / "boot_app0.bin"
+)
+
+build_dir = PROJECT_DIR / ".pio" / "build" / ENV_NAME
+images = {
+    "bootloader": build_dir / "bootloader.bin",
+    "partition_table": build_dir / "partitions.bin",
+    "app": build_dir / "firmware.bin",
+    "otadata": BOOT_APP0_PATH,
+}
+
+fs_names = {
+    "spiffs": "spiffs.bin",
+    "littlefs": "littlefs.bin",
+    "fatfs": "fatfs.bin",
+}
+fs_name = "littlefs.bin"
+FS_PATH = build_dir / fs_name
 
 def note():
     if FLASH_ENCRYPTION:
@@ -725,20 +809,17 @@ def note():
         #bootloader_path = r"C:\Espressif\frameworks\esp-idf-v5.4.1\flash_encryption_dev\build\bootloader\bootloader.bin" # NOT NECESSARY # FOR TESTING
         bootloader_path = encrypt_binary(
             bootloader_path,
-            "bootloader_encrypted.bin",
             "0x0"
         )
         
         #partitions_path = r"C:\Espressif\frameworks\esp-idf-v5.4.1\flash_encryption_dev\build\partition_table\partition-table.bin" # NOT NECESSARY # FOR TESTING
         partitions_path = encrypt_binary(
             partitions_path,
-            "partitions_encrypted.bin",
             "0x8000"
         )
         #boot_app0_path = r"C:\Espressif\frameworks\esp-idf-v5.4.1\flash_encryption_dev\build\ota_data_initial.bin" # NOT NECESSARY # FOR TESTING
         boot_app0_path = encrypt_binary(
-            boot_app0_path,
-            "otadata_encrypted.bin",
+            BOOT_APP0_PATH,
             "0xe000"
         )
         #firmware_path = r"C:/Espressif/frameworks/esp-idf-v5.4.1/flash_encryption_dev/build/flash_encryption_dev.bin" # FOR TESTING
@@ -746,9 +827,14 @@ def note():
         print(firmware_path)
         firmware_path = encrypt_binary(
             firmware_path,
-            "firmware_encrypted.bin",
             "0x10000"
         )
+
+        if ENCRYPT_FS: ## ENSURE PARTITION FOR FILESYSTEM HAS "encrypted" WRITTEN IN THE FLAG COLUMN
+            filesystem_path = encrypt_binary(
+                FS_PATH,
+                "0xe6750208"
+            )
         print("2")
         print(firmware_path)
 
@@ -777,3 +863,14 @@ def note():
         "0x10000", firmware_path
     ]
 
+# common spot for encryption partition tables is in... 
+#C:\Users\[USERNAM]\.platformio\packages\framework-arduinoespressif32\tools\partitions
+''' example for file system flag that is required if you choose to encrypt it
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x140000,
+app1,     app,  ota_1,   0x150000,0x140000,
+spiffs,   data, spiffs,  0x290000,0x160000, encrypted
+coredump, data, coredump,0x3F0000,0x10000,
+'''

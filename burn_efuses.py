@@ -1,3 +1,9 @@
+'''
+Code and guide posted at:
+https://github.com/UsableLoki8221/GUIDE---ESP32_Flash_Encryption
+'''
+
+
 import sys
 import serial
 import subprocess
@@ -9,35 +15,54 @@ from pathlib import Path
 from datetime import datetime
 from serial.tools import list_ports
 
-import hmac, hashlib, binascii
+# efuse summary command example
+#    python -m platformio pkg exec -p tool-esptoolpy -- espefuse.py --chip esp32c3 --port COM22 summary
+# json form:
+#   python -m platformio pkg exec -p tool-esptoolpy -- espefuse.py --chip esp32c3 --port COM22 summary --format json
+
+ESP_CHIP = "esp32c3"            # state the ESP you are burning to, no hyphen
 
 COM_PORT = ""                   # leave as "" to auto-detect esp COM port, otherwise manually enter with COMxx format
 
-LOG_MAC_ID_TO_CSV = True
-
-#choose your mode: (choose one, comment the rest)
-FLASH_BIT_TO_BURN = "0b001"     #<--recommended 
-                                # "Dev" mode- this mode allows you to come back from 
-                                # flash encryption one more time when you transition to 0b011.  
-                                # Nice for letting makers mod your board if you want to give 
-                                # them that freedom (do it ;) )
-
-# FLASH_BIT_TO_BURN = "0b011"   # undo flash encryption: this is a one-time fallback to allow 
-                                # a device to be flashed with plain text code once again
-
-# FLASH_BIT_TO_BURN = "0b111"   # "Release" mode- PERMANENT; CANNOT BE UNDONE.  Permantly set to flash encryption.
-
-DEBUG_ABORT = True
-ENABLE_INFO = True
-
-PROJECT_DIR = Path(__file__).resolve().parent
-
-FLASH_ENCRYPTION_FILE = PROJECT_DIR / "flash_encryption_key.bin" 
-
-CSV_FILE = PROJECT_DIR / "flash_encrypted_devices.csv" 
+LOG_MAC_ID_TO_CSV = True        # if you want to record provisioned devices
 
 FLASH_ENCRYPTION_KEY_SLOT = 0 # BLOCK_KEY0 (BLOCK4) ASSIGNED FOR ENCRYPTION KEY
 
+#choose your mode: (choose one, comment the rest)
+FLASH_BIT_TO_BURN = "0b001"    #<--recommended imo
+                                    # "Dev" mode- this mode allows you to come back from 
+                                    # flash encryption one more time when you transition to 0b011.  
+                                    # Nice for letting makers mod your board if you want to give 
+                                    # them that freedom (do it ;) )
+
+#FLASH_BIT_TO_BURN = "0b011"        # undo flash encryption: this is a one-time fallback to allow 
+                                    # a device to be flashed with plain text code once again
+
+#FLASH_BIT_TO_BURN = "0b111"         # "Release" mode- PERMANENT; CANNOT BE UNDONE.  Permantly set to flash encryption.
+SET_TO_TRUE_RELEASE_MODE = True    # Setting the bit to 0b111 isn't true release, to be truly release additional fuses, look at code to see
+                                    # True release mode may disable serial monitor communication, again this is permanent
+                                    #
+''' # you can also put this in your firmware and let the ESP self-burn its own fuses to finalize the mode, its good to do your research on this topic
+#include "esp_flash_encrypt.h"
+
+if (!esp_flash_encryption_cfg_verify_release_mode()) {
+    esp_flash_encryption_set_release_mode();
+}
+'''
+
+
+DEBUG_ABORT = False
+ENABLE_INFO = True
+
+###
+### you shouldn't need to change anything below here
+###
+
+PROJECT_DIR = Path(__file__).resolve().parent
+
+FLASH_ENCRYPTION_KEY_FILE = PROJECT_DIR / "flash_encryption_key.bin" 
+
+CSV_FILE = PROJECT_DIR / "flash_encrypted_devices.csv" 
 
 def info(message):
     if ENABLE_INFO:
@@ -216,7 +241,7 @@ def confirm_burn(mac):
         print(f"\n{RED}User interrupted input. Aborting.{RESET}")
         return False
 
-    if confirm1 == "YES" or confirm1.lower() == "y":
+    if confirm1.lower() == "yes" or confirm1.lower() == "y":
         return True
 
     return False
@@ -269,12 +294,12 @@ def enter_bootloader(COM_PORT):
 
 
 
-def burn_efuse(COM_PORT, flag_FLASH_ENCRYPTION_KEY, SPI_BOOT_CRYPT_CNT_flag):
+def burn_efuse(COM_PORT, FLASH_ENCRYPTION_KEY_flag, SPI_BOOT_CRYPT_CNT_flag):
 
     try:
         def run_stream(command, description, timeout=60):
             print(f"\n=== {description} ===")
-            print(" ".join(command))
+            print(" ".join(map(str, command)))
             print()
 
             process = subprocess.Popen(
@@ -285,9 +310,11 @@ def burn_efuse(COM_PORT, flag_FLASH_ENCRYPTION_KEY, SPI_BOOT_CRYPT_CNT_flag):
             )
 
             try:
-                for line in process.stdout:
-                    print(line, end="")
-
+                if ENABLE_INFO:
+                    print("[[[[[[[[[[[[[[[[[[[[[[[FUSE COMMAND MESSAGES]]]]]]]]]]]]]]]]]]]]]]]")
+                    for line in process.stdout:
+                        print(line, end="")
+                    #print("[[[[[[[[[[[[[[[[[[[[[[[END MESSAGES]]]]]]]]]]]]]]]]]]]]]]]")
                 process.wait(timeout=timeout)
 
             except subprocess.TimeoutExpired:
@@ -300,22 +327,24 @@ def burn_efuse(COM_PORT, flag_FLASH_ENCRYPTION_KEY, SPI_BOOT_CRYPT_CNT_flag):
                 print(f"{RED}{description} FAILED{RESET}")
                 return False
 
-            print(f"{GREEN}{description} SUCCESS{RESET}")
+            print(f"{GREEN}{description} OPERATION COMPLETED{RESET}")
+            print(f"{ORANGE}\nCONTINUING...\n{RESET}")
+
             return True
 
 
         # Burn the flash-encryption key
-        if flag_FLASH_ENCRYPTION_KEY:
+        if FLASH_ENCRYPTION_KEY_flag:
             key_command = [
                 sys.executable,
                 "-m", "espefuse",
-                "--chip", "esp32c3",
+                "--chip", ESP_CHIP,
                 "--port", COM_PORT,
                 "--do-not-confirm",
                 "burn-key",
                 f"BLOCK_KEY{FLASH_ENCRYPTION_KEY_SLOT}",
-                FLASH_ENCRYPTION_FILE,
-                "XTS_AES_128_KEY", # THIS DESIGNATES THE SLOT AS USED FOR FLASH DECRYPTION
+                str(FLASH_ENCRYPTION_KEY_FILE),
+                "XTS_AES_128_KEY", # THIS DESIGNATES THE KEY TYPE IN THE DESIGNATED SLOT
             ]
 
             if not run_stream(key_command, "Burn flash-encryption key"): #ensure pass before burning flash enable fuse
@@ -326,13 +355,38 @@ def burn_efuse(COM_PORT, flag_FLASH_ENCRYPTION_KEY, SPI_BOOT_CRYPT_CNT_flag):
             counter_command = [
                 sys.executable,
                 "-m", "espefuse",
-                "--chip", "esp32c3",
+                "--chip", ESP_CHIP,
                 "--port", COM_PORT,
                 "--do-not-confirm",
-                "burn-efuse",
-                "SPI_BOOT_CRYPT_CNT",
-                str(int(FLASH_BIT_TO_BURN, 2)),
+                "burn-efuse", 
             ]
+
+            counter_command.extend(["SPI_BOOT_CRYPT_CNT",str(int(FLASH_BIT_TO_BURN, 2)),])
+
+            if ESP_CHIP == "esp32":
+                counter_command.extend(["FLASH_CRYPT_CONFIG","0xF",])
+                if SET_TO_TRUE_RELEASE_MODE:
+                    counter_command.extend([
+                        "DISABLE_DL_ENCRYPT", "1",
+                        "DISABLE_DL_DECRYPT", "1",
+                        "DISABLE_DL_CACHE", "1",
+                        "JTAG_DISABLE", "1",
+                    ])
+            else:
+                if SET_TO_TRUE_RELEASE_MODE:
+                    counter_command.extend([
+                        "DIS_DOWNLOAD_ICACHE", "1",
+                        "DIS_DOWNLOAD_MANUAL_ENCRYPT", "1",
+                    ])
+
+            '''
+            #burn additional fuses in pair as fuse name + value like so: (espressif recommends a bunch of these for commercial releases, do them at your own call)
+            counter_command.extend(["
+                "DIS_LEGACY_SPI_BOOT", "1",
+                "DIS_USB_JTAG", "1",
+                "DIS_PAD_JTAG", "1",
+            ])
+            '''
 
             if not run_stream(
                 counter_command,
@@ -427,8 +481,10 @@ def is_efuse_already_burned(efuse_summary, block_num):
     print(f"{RED}Could not find {block_name} in eFuse summary{RESET}")
     return True  # fail safe
 
+FOUND_BIT = None
 
 def is_efuse_flag_burned(efuse_summary, efuse_name):
+    global FOUND_BIT
 
     print(f"{RESET}Checking eFuse flag {efuse_name}...{RESET}")
 
@@ -449,6 +505,16 @@ def is_efuse_flag_burned(efuse_summary, efuse_name):
         # =====================================================
         if efuse_name == "SPI_BOOT_CRYPT_CNT":
 
+            match = re.search(r"\b0b[01]+\b", stripped)
+
+            if match:
+                FOUND_BIT = match.group(0)
+                print(f"{GREEN}FOUND_BIT = {FOUND_BIT}{RESET}")
+            else:
+                FOUND_BIT = None
+                print(f"{RED}Could not extract binary fuse value{RESET}")
+                return False
+            
             lowered = stripped.lower()
 
             if "disable" in lowered:
@@ -518,7 +584,7 @@ def setFuseFlag(fuse_summary, name, confirmation_message=False):
         return True
 
 
-def log_to_csv(mac): #, master_key_hex, ota_key_hex):
+def log_to_csv(mac, bit_burned): #, master_key_hex, ota_key_hex):
     file_exists = os.path.exists(CSV_FILE)
     ts = datetime.now().isoformat()
 
@@ -526,11 +592,12 @@ def log_to_csv(mac): #, master_key_hex, ota_key_hex):
         writer = csv.writer(f)
 
         if not file_exists:
-            writer.writerow(["timestamp", "mac", "DEVICE_KEY", "USER_BLOCK"])
+            writer.writerow(["timestamp", "mac", "SPI_BOOT_CRYPT_CNT"])
 
         writer.writerow([
             ts,
-            mac
+            mac,
+            bit_burned
         ])
 
     print(f"{GREEN}Logged to CSV: {CSV_FILE}{RESET}")
@@ -547,7 +614,7 @@ def main():
 
     mac, mac_bytes = mac_result
 
-    FLASH_ENCRYPTION_KEY = load_key(FLASH_ENCRYPTION_FILE)
+    FLASH_ENCRYPTION_KEY = load_key(FLASH_ENCRYPTION_KEY_FILE)
     if FLASH_ENCRYPTION_KEY is not None: print(f"{PURPLE}FLASH_ENCRYPTION key loaded{RESET}")
     else: 
         print(f"ERROR: FLASH_ENCRYPTION_KEY is None{RESET}")
@@ -567,18 +634,41 @@ def main():
         return False
 
     
-    flag_FLASH_ENCRYPTION_KEY = True
+    FLASH_ENCRYPTION_KEY_flag = True
     flash_encryption_slot_burned = is_efuse_already_burned(fuse_summary, FLASH_ENCRYPTION_KEY_SLOT)
     if flash_encryption_slot_burned:
         print(f"{YELLOW}slot0 (flash_encryption) already burned: Setting flag to prevent overwriting eFuse{RESET}")
-        flag_FLASH_ENCRYPTION_KEY = False
+        FLASH_ENCRYPTION_KEY_flag = False
         if not verify_key_purpose(fuse_summary, FLASH_ENCRYPTION_KEY_SLOT, "XTS_AES_128_KEY"):
             print(f"{RED}DESIGNATED SLOT FOR ENCRYPTION ALREADY HAS A DIFFERENT TYPE OF KEY PLACED IN SLOT: {FLASH_ENCRYPTION_KEY_SLOT}{RESET}") 
         else: 
             print(f"{GREEN}XTS_AES_128_KEY has already been assigned in slot: {FLASH_ENCRYPTION_KEY_SLOT}{RESET}") 
 
 
-    SPI_BOOT_CRYPT_CNT_flag = setFuseFlag(fuse_summary, "SPI_BOOT_CRYPT_CNT") # flash encryption
+    SPI_BOOT_CRYPT_CNT_flag = setFuseFlag(fuse_summary, "SPI_BOOT_CRYPT_CNT") # this used to set the bool but realized it was unncessary with the logic below
+                                                                              # leaving it in because it updates a global variable (FOUND_BIT)
+    SPI_BOOT_CRYPT_CNT_flag = True
+    if int(FLASH_BIT_TO_BURN, 2) < int(FOUND_BIT, 2):
+        print(
+            f"{RED}The SPI_BOOT_CRYPT_CNT bit cannot be less than {BOLD}{BLUE}{FOUND_BIT}{RESET}{RED} "
+            f"as that is what was found within the ESP\n"
+            f"You currently have FLASH_BIT_TO_BURN set to: {ORANGE}{FLASH_BIT_TO_BURN}{RESET}"
+        )
+        return False
+
+       
+    print(f"{ORANGE}Settings-{RESET}")    
+    if FLASH_ENCRYPTION_KEY_flag: print(f"{ORANGE}Preparing to burn key into device: {FLASH_ENCRYPTION_KEY_flag}, Slot: {FLASH_ENCRYPTION_KEY_SLOT}{RESET}")
+    else : print(f"{ORANGE}Flash encryption key is flagged to {BOLD}NOT{RESET}{ORANGE} burn since there is already a key in slot {FLASH_ENCRYPTION_KEY_SLOT}{RESET}")
+    print(
+    f"{ORANGE}Flash bit to burn: {VIOLET}{FLASH_BIT_TO_BURN}  {BLUE}Found bit in device: {FOUND_BIT} - "
+    f"({ 'Dev mode' if FLASH_BIT_TO_BURN == '0b001' else 'Release mode' if FLASH_BIT_TO_BURN == '0b111' else 'Flash encryption disabled' if FLASH_BIT_TO_BURN in ('0b011', '0b000') else 'Unknown mode' }){RESET}"
+    )
+    print(f"{ORANGE}\nONCE A KEY OR A SETTING HAS BEEN BURNED INTO THE DEVICE IT CANNOT BE UNDONE- Example: 0b111 -> 0b011 is not possible\n")
+
+    if int(FLASH_BIT_TO_BURN, 2) == int(FOUND_BIT, 2) and not FLASH_ENCRYPTION_KEY_flag:
+        print(f"{RED}ESP ALREADY HAS KEY BURNED INTO THE SLOT {BLUE}{BOLD}{FLASH_ENCRYPTION_KEY_SLOT}{RESET}{RED} AND THE SPI_BOOT_CRYPT_CNT FUSE HAS ALREADY BEEN SET TO {BLUE}{BOLD}{FOUND_BIT}{RESET}{RED}- ABORTING")
+        return False
 
     if DEBUG_ABORT:
         print(f"{BLUE}DEBUG ABORT IS ACTIVE, THE OPERATION IS ABORTING AT THIS POINT TO PREVENT UNINTENDED FUSE BURNING{RESET}")
@@ -589,12 +679,14 @@ def main():
         # You can comment/remove this if you're confident in this process for faster burning
     if not confirm_burn(mac):
         print(f"{RED}User aborted{RESET}")
-        sys.exit(1)
+        return False
 
-    enter_bootloader(COM_PORT) # probably not required but it helps
+    print(f"{ORANGE}\nTHE FOLLOWING OPERATIONS TAKE A WHILE TO EXECUTE, ITS RECOMMENDED TO NOT INTERRUPT THE SCRIPT AT THIS POINT\n{RESET}")
+
+    enter_bootloader(COM_PORT) # this helps if you forgot you left your serial monitor on when reflashing
 
     #BURN BABY BURN
-    burn_efuse(COM_PORT, flag_FLASH_ENCRYPTION_KEY, SPI_BOOT_CRYPT_CNT_flag)
+    burn_efuse(COM_PORT, FLASH_ENCRYPTION_KEY_flag, SPI_BOOT_CRYPT_CNT_flag)
 
     time.sleep(0.5)
     fuse_summary = esp_retrieve_fuse_summary(COM_PORT)
@@ -613,7 +705,9 @@ def main():
         failFlag = True
 
     flash_encryption_slot_burned = is_efuse_already_burned(fuse_summary, FLASH_ENCRYPTION_KEY_SLOT)
-    if flash_encryption_slot_burned: failFlag = True
+    if not flash_encryption_slot_burned:
+        print(f"{RED}eFuse slot did not have key burned: slot {FLASH_ENCRYPTION_KEY_SLOT}{RESET}") 
+        failFlag = True
 
     if not verify_key_purpose(fuse_summary, FLASH_ENCRYPTION_KEY_SLOT, "XTS_AES_128_KEY"):
         print(f"{RED}eFuse purpose incorrect- slot {FLASH_ENCRYPTION_KEY_SLOT}{RESET}") 
@@ -622,11 +716,11 @@ def main():
     if failFlag:
         print(f"ERROR WITH {mac}")
         mac = mac + "_ERROR"
-        if LOG_MAC_ID_TO_CSV:log_to_csv(mac)
+        if LOG_MAC_ID_TO_CSV:log_to_csv(mac, FLASH_BIT_TO_BURN)
         return False
     
     # Log
-    if LOG_MAC_ID_TO_CSV:log_to_csv(mac)
+    if LOG_MAC_ID_TO_CSV:log_to_csv(mac, FLASH_BIT_TO_BURN)
 
     print(f"{GREEN}Provisioning complete{RESET}")
     return True
@@ -635,9 +729,12 @@ def main():
 if __name__ == "__main__":
     try:
         if main():
+            print_rainbow("SUCCESS")
             print_rainbow("ALL DONE")
+            sys.exit(0)
         else:
             print(f"{RED}ERROR ERROR ERROR{RESET}")
+            sys.exit(1)
     except Exception as error:
         print(f"{RED}ERROR: {error}{RESET}", file=sys.stderr)
         sys.exit(1)
