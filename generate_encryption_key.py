@@ -1,6 +1,7 @@
 '''
 Code and guide posted at:
 https://github.com/UsableLoki8221/GUIDE---ESP32_Flash_Encryption
+https://youtu.be/GyAqlYea8wU
 '''
 
 from pathlib import Path
