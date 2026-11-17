@@ -366,7 +366,7 @@ def burn_efuse(COM_PORT, FLASH_ENCRYPTION_KEY_flag, SPI_BOOT_CRYPT_CNT_flag):
 
             if ESP_CHIP == "esp32":
                 counter_command.extend(["FLASH_CRYPT_CONFIG","0xF",])
-                if SET_TO_TRUE_RELEASE_MODE:
+                if SET_TO_TRUE_RELEASE_MODE and FLASH_BIT_TO_BURN == '0b111':
                     counter_command.extend([
                         "DISABLE_DL_ENCRYPT", "1",
                         "DISABLE_DL_DECRYPT", "1",
@@ -374,7 +374,7 @@ def burn_efuse(COM_PORT, FLASH_ENCRYPTION_KEY_flag, SPI_BOOT_CRYPT_CNT_flag):
                         "JTAG_DISABLE", "1",
                     ])
             else:
-                if SET_TO_TRUE_RELEASE_MODE:
+                if SET_TO_TRUE_RELEASE_MODE and FLASH_BIT_TO_BURN == '0b111':
                     counter_command.extend([
                         "DIS_DOWNLOAD_ICACHE", "1",
                         "DIS_DOWNLOAD_MANUAL_ENCRYPT", "1",
