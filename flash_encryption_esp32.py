@@ -42,8 +42,10 @@ SERIAL_MONITOR = True           # view device serial monitor message directly af
 ENABLE_INFO = True              # script debug message viewer
 SHOW_FUSE_SUMMARY = False       # see the fuse summary as you upload - don't recommend because its a wall of text, it'll clear your terminal up
 
-# vvv CHANGE THIS IF NEEDED FOR LARGER FLASH SIZE BOARDS
-PARTITION_CSV_PATH = ""         # if using a different partition scheme then set csv file path, otherwise default values used:
+
+# vvv CHANGE THIS NEEDS TO BE UPDATED WITH A VALID PARTITION CSV IF YOU ARE USING >4MB BOARD SIZE
+PARTITION_CSV_PATH = ""         # DEFAULT 4MB IF EMPTY, UPDATE IF BIGGER BOARD SIZE LIKE 8MB OR 16MB
+                                # if using a different partition scheme then set csv file path, otherwise default values used:
                                 # this is usually located somewhere like..C:\Users\[USERNAM]\.platformio\packages\framework-arduinoespressif32\tools\partitions
                                 # default partition is.. "C:\Users\...\.platformio\packages\framework-arduinoespressif32\tools\partitions\default.csv"
 
