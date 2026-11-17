@@ -37,7 +37,7 @@ UPLOAD_FS = False               # if you use a file system then set to true
 ENCRYPT_FS = False              # if you want the file system also encrypted- the CSV should have the encrypted flag placed btw 
 SERIAL_MONITOR = True           # view device serial monitor message directly after flashing 
 
-FILESYSTEM_TYPE = "littlefs"    # supported fs types: "spiffs", "littlefs", "fatfs"
+#Moved this to be automatically set in code; FILESYSTEM_TYPE = "littlefs"    # supported fs types: "spiffs", "littlefs", "fatfs"
 
 ENABLE_INFO = True              # script debug message viewer
 SHOW_FUSE_SUMMARY = False       # see the fuse summary as you upload - don't recommend because its a wall of text, it'll clear your terminal up
@@ -142,6 +142,7 @@ def get_platformio_setting(key, fallback=None):
         return config.get("env", key).strip().strip('"').strip("'")
 
     if fallback is not None:
+        print(f"{YELLOW}{key} not found in platformio.ini, strongly suggest adding it.  Using fallback value of {fallback}{RESET}")
         return fallback
 
     raise ValueError(
@@ -155,6 +156,8 @@ BAUD_RATE = get_platformio_setting("upload_speed", fallback="921600")
 FLASH_MODE = get_platformio_setting("board_build.flash_mode", fallback="dio")
 FLASH_FREQ = get_platformio_setting("board_build.f_flash", fallback="80m")
 FLASH_SIZE = get_platformio_setting("board_build.flash_size", fallback="4MB")
+FILESYSTEM_TYPE = get_platformio_setting("board_build.filesystem", fallback="littlefs")
+
 
 
 BOARD_TO_CHIP = {
