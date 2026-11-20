@@ -133,7 +133,9 @@ def get_platformio_setting(key, fallback=None):
         visited.add(section)
 
         if section in config and config.has_option(section, key):
-            return config.get(section, key).strip().strip('"').strip("'")
+            value = config.get(section, key)
+            value = value.split(";", 1)[0].strip()
+            return value.strip('"').strip("'")
 
         if section not in config:
             break
@@ -141,10 +143,12 @@ def get_platformio_setting(key, fallback=None):
         section = config.get(section, "extends", fallback="").strip()
 
     if config.has_section("env") and config.has_option("env", key):
-        return config.get("env", key).strip().strip('"').strip("'")
+        value = config.get("env", key)
+        value = value.split(";", 1)[0].strip()
+        return value.strip('"').strip("'")
 
     if fallback is not None:
-        print(f"{YELLOW}{key} not found in platformio.ini, strongly suggest adding it.  Using fallback value of {fallback}{RESET}")
+        print(f"{YELLOW}{key} not found in platformio.ini, strongly suggest adding it. Using fallback value of {fallback}{RESET}")
         return fallback
 
     raise ValueError(
@@ -614,18 +618,20 @@ def flash_images(images, offsets, flash_encryption):
     print(f"FLASH_MODE: {FLASH_MODE}")
     print(f"FLASH_FREQ: {FLASH_FREQ}")
 
-    command = get_esptool_command(
-        "esptool.py",
+    command = [
+        sys.executable,
+        "-m",
+        "esptool",
         "--chip", CHIP,
         "--port", COM_PORT,
-        "--baud", BAUD_RATE,
+        "--baud", str(BAUD_RATE),
         "--before", "default_reset",
         "--after", "hard_reset",
         "write-flash",
         "--flash-mode", FLASH_MODE,
         "--flash-freq", FLASH_FREQ,
         "--flash-size", FLASH_SIZE,
-    )
+    ]
 
     if not flash_encryption:
         command.append("-z")
