@@ -202,6 +202,7 @@ def detect_chip(board):
     board = board.strip().lower()
 
     if board in BOARD_TO_CHIP:
+        print(f"{PURPLE}DETECTED CHIP AS...{BOARD_TO_CHIP[board]}{RESET}")
         return BOARD_TO_CHIP[board]
 
     patterns = (
@@ -219,8 +220,10 @@ def detect_chip(board):
         (r"esp32[-_]p4(?:[-_]|$)", "esp32p4"),
     )
 
+
     for pattern, chip in patterns:
         if re.search(pattern, board):
+            print(f"{PURPLE}DETECTED CHIP AS...{chip}{RESET}")
             return chip
 
     if re.match(r"^esp32(?:[-_]|$)", board):
@@ -230,7 +233,6 @@ def detect_chip(board):
         f"Cannot determine esptool chip from PlatformIO board '{board}'. "
         "Add its board ID to BOARD_TO_CHIP or update detect_chip()."
     )
-
 
 CHIP = detect_chip(BOARD)
 
