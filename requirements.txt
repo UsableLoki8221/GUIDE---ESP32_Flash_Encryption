@@ -6,5 +6,5 @@
 pyserial
 platformio
 pyyaml
-esptool==5.2.0
+esptool==5.3.0
 bitstring<5
