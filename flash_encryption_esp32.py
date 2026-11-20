@@ -559,15 +559,10 @@ def encrypt_binary(input_path, offset):
                 pass
 
     cmd = [
-        "python",
+        sys.executable,
         "-m",
-        "platformio",
-        "pkg",
-        "exec",
-        "-p",
-        "tool-esptoolpy",
-        "--",
-        "espsecure.py", # comment this if running espsecure from esp idf folder below v
+        "espsecure",
+        # "espsecure.py", # comment this if running espsecure from esp idf folder below v
         #r"C:\Espressif\frameworks\esp-idf-v5.4.1\components\esptool_py\esptool\espsecure.py", # I've had issues where espsecure python file in platformio did not encrypt correct, it was fixed directly running it from esp idf tools
         "encrypt_flash_data",
         "--aes-xts",
